@@ -10,10 +10,11 @@ import (
 )
 
 func main() {
-	logger := log.New(os.Stdout, "TDX Proxy: ", log.LstdFlags)
-	proxy := tdxproxy.NewTDXProxyNoAuth(logger)
+	proxy := tdxproxy.NewTDXProxyNoAuth(nil)
 
-	resp, err := proxy.Get("v2/Bus/Alert/City/Taichung", nil, nil, 10*time.Second)
+	url := "v2/Bus/Alert/City/Taichung"
+
+	resp, err := proxy.Get(url, nil, nil, 10*time.Second)
 	if err != nil {
 		log.Fatalf("Error: %v", err)
 	}
@@ -24,4 +25,8 @@ func main() {
 		log.Fatalf("Error reading response body: %v", err)
 	}
 	log.Println(string(body))
+	log.Println("headers:", resp.Header)
+
+	// save to file
+	os.WriteFile("response.json", body, 0644)
 }
