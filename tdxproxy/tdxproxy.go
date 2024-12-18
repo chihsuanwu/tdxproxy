@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	tdxURLBase = "https://tdx.transportdata.tw/api/basic/"
-	authURL    = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
+	TDX_URL_BASIC = "https://tdx.transportdata.tw/api/basic/"
+	authURL       = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 )
 
 // TDXProxy simplifies the interface process with the TDX platform.
@@ -25,6 +25,7 @@ type TDXProxy struct {
 	appID       string
 	appKey      string
 	authToken   string
+	baseUrl     string
 	expiredTime int64
 	logger      *slog.Logger
 }
@@ -36,6 +37,7 @@ func NewTDXProxy(appID, appKey string, logger *slog.Logger) *TDXProxy {
 	return &TDXProxy{
 		appID:       appID,
 		appKey:      appKey,
+		baseUrl:     TDX_URL_BASIC,
 		authToken:   "",
 		expiredTime: time.Now().Unix(),
 		logger:      logger,
@@ -81,9 +83,10 @@ func NewTDXProxyNoAuth(logger *slog.Logger) *TDXProxy {
 		logger = slog.Default()
 	}
 	return &TDXProxy{
-		appID:  "",
-		appKey: "",
-		logger: logger,
+		appID:   "",
+		appKey:  "",
+		baseUrl: TDX_URL_BASIC,
+		logger:  logger,
 	}
 }
 
@@ -92,6 +95,15 @@ func (proxy *TDXProxy) Get(url string, params map[string]string, headers map[str
 		params = map[string]string{"$format": "JSON"}
 	}
 	return proxy.requestWithRetry(url, params, headers, timeout, 0)
+}
+
+func (proxy *TDXProxy) SetBaseURL(url string) {
+	if url == "" {
+		proxy.logger.Warn("Empty base URL provided")
+		return
+	}
+
+	proxy.baseUrl = url
 }
 
 func (proxy *TDXProxy) requestWithRetry(url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
@@ -154,7 +166,7 @@ func (proxy *TDXProxy) handleResponse(resp *http.Response, url string, params, h
 // buildFullURL constructs the full API URL with query parameters.
 func (proxy *TDXProxy) buildFullURL(url string, params map[string]string) string {
 	var builder strings.Builder
-	builder.WriteString(tdxURLBase)
+	builder.WriteString(proxy.baseUrl)
 	builder.WriteString(url)
 	builder.WriteString("?")
 
