@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	URL_BASIC = "https://tdx.transportdata.tw/api/basic/"
-	authURL   = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
+	TDX_HOST  = "https://tdx.transportdata.tw"
+	URL_BASIC = "/api/basic/"
+	URL_AUTH  = "/auth/realms/TDXConnect/protocol/openid-connect/token"
 )
 
 // TDXProxy simplifies the interface process with the TDX platform.
@@ -24,12 +25,14 @@ const (
 type TDXProxy interface {
 	Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error)
 	SetBaseURL(url string)
+	SetHost(url string)
 }
 
 type proxy struct {
 	appID       string
 	appKey      string
 	authToken   string
+	host        string
 	baseUrl     string
 	expiredTime int64
 	logger      *slog.Logger
@@ -44,6 +47,7 @@ func NewProxy(appID, appKey string, logger *slog.Logger) TDXProxy {
 		appKey:      appKey,
 		baseUrl:     URL_BASIC,
 		authToken:   "",
+		host:        TDX_HOST,
 		expiredTime: time.Now().Unix(),
 		logger:      logger,
 	}
@@ -90,6 +94,7 @@ func NewNoAuthProxy(logger *slog.Logger) TDXProxy {
 	return &proxy{
 		appID:   "",
 		appKey:  "",
+		host:    TDX_HOST,
 		baseUrl: URL_BASIC,
 		logger:  logger,
 	}
@@ -113,6 +118,16 @@ func (proxy *proxy) SetBaseURL(url string) {
 	}
 
 	proxy.baseUrl = url
+}
+
+// SetHost sets the host URL for the TDX platform.
+func (proxy *proxy) SetHost(url string) {
+	if url == "" {
+		proxy.logger.Warn("Empty host URL provided")
+		return
+	}
+
+	proxy.host = url
 }
 
 func (proxy *proxy) requestWithRetry(url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
@@ -142,39 +157,45 @@ func (proxy *proxy) requestWithRetry(url string, params, headers map[string]stri
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	if err := proxy.handleResponse(resp, url, params, headers, timeout, retryCount); err != nil {
+	resp, err = proxy.handleResponse(resp, url, params, headers, timeout, retryCount)
+	if err != nil {
 		return nil, err
 	}
+
 	return resp, nil
 }
 
-func (proxy *proxy) handleResponse(resp *http.Response, url string, params, headers map[string]string, timeout time.Duration, retryCount int) error {
+func (proxy *proxy) handleResponse(resp *http.Response, url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusNotModified:
 		proxy.logger.Info("Successful request", slog.String("url", url), slog.Int("status", resp.StatusCode))
-		return nil
+		return resp, nil
 	case http.StatusUnauthorized:
 		proxy.logger.Warn("Unauthorized, refreshing token...", slog.String("url", url))
+		resp.Body.Close()
 		if err := proxy.updateAuth(timeout); err != nil {
-			return fmt.Errorf("failed to refresh auth token: %w", err)
+			return nil, fmt.Errorf("failed to refresh auth token: %w", err)
 		}
 		proxy.logger.Info("Retrying request after refreshing token")
-		_, err := proxy.requestWithRetry(url, params, headers, timeout, retryCount+1)
-		return err
+		resp, err := proxy.requestWithRetry(url, params, headers, timeout, retryCount+1)
+		return resp, err
 	case http.StatusTooManyRequests:
 		proxy.logger.Warn("Rate limit reached, retrying...", slog.String("url", url))
+		resp.Body.Close()
 		time.Sleep(1 * time.Second)
-		_, err := proxy.requestWithRetry(url, params, headers, timeout, retryCount+1)
-		return err
+		resp, err := proxy.requestWithRetry(url, params, headers, timeout, retryCount+1)
+		return resp, err
 	default:
 		proxy.logger.Error("Unexpected status code", slog.String("url", url), slog.Int("status", resp.StatusCode))
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		resp.Body.Close()
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 }
 
 // buildFullURL constructs the full API URL with query parameters.
 func (proxy *proxy) buildFullURL(url string, params map[string]string) string {
 	var builder strings.Builder
+	builder.WriteString(proxy.host)
 	builder.WriteString(proxy.baseUrl)
 	builder.WriteString(url)
 	builder.WriteString("?")
@@ -208,7 +229,7 @@ func (proxy *proxy) buildAuthHeaders(timeout time.Duration) (map[string]string, 
 // updateAuth fetches a new authentication token.
 func (proxy *proxy) updateAuth(timeout time.Duration) error {
 	data := fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", proxy.appID, proxy.appKey)
-	req, err := http.NewRequest("POST", authURL, bytes.NewBufferString(data))
+	req, err := http.NewRequest("POST", proxy.host+URL_AUTH, bytes.NewBufferString(data))
 	if err != nil {
 		return fmt.Errorf("failed to create auth request: %w", err)
 	}
