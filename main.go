@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	proxy := tdxproxy.NewTDXProxyNoAuth(nil)
+	proxy := tdxproxy.NewNoAuthProxy(nil)
 
 	url := "v2/Bus/Alert/City/Taichung"
 

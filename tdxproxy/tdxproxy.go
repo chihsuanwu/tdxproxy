@@ -14,14 +14,19 @@ import (
 )
 
 const (
-	TDX_URL_BASIC = "https://tdx.transportdata.tw/api/basic/"
-	authURL       = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
+	URL_BASIC = "https://tdx.transportdata.tw/api/basic/"
+	authURL   = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token"
 )
 
 // TDXProxy simplifies the interface process with the TDX platform.
 // You can directly call the TDX platform's API as long as
 // the Client ID and Secret Key are provided.
-type TDXProxy struct {
+type TDXProxy interface {
+	Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error)
+	SetBaseURL(url string)
+}
+
+type proxy struct {
 	appID       string
 	appKey      string
 	authToken   string
@@ -30,14 +35,14 @@ type TDXProxy struct {
 	logger      *slog.Logger
 }
 
-func NewTDXProxy(appID, appKey string, logger *slog.Logger) *TDXProxy {
+func NewProxy(appID, appKey string, logger *slog.Logger) TDXProxy {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &TDXProxy{
+	return &proxy{
 		appID:       appID,
 		appKey:      appKey,
-		baseUrl:     TDX_URL_BASIC,
+		baseUrl:     URL_BASIC,
 		authToken:   "",
 		expiredTime: time.Now().Unix(),
 		logger:      logger,
@@ -53,7 +58,7 @@ func NewTDXProxy(appID, appKey string, logger *slog.Logger) *TDXProxy {
 //	}
 //
 // The file path can be specified as the first argument, or the TDX_CREDENTIALS_FILE environment variable.
-func NewTDXProxyFromCredentialFile(fileName string, logger *slog.Logger) (*TDXProxy, error) {
+func NewProxyFromCredentialFile(fileName string, logger *slog.Logger) (TDXProxy, error) {
 	if fileName == "" {
 		fileName = os.Getenv("TDX_CREDENTIALS_FILE")
 	}
@@ -75,29 +80,33 @@ func NewTDXProxyFromCredentialFile(fileName string, logger *slog.Logger) (*TDXPr
 		return nil, err
 	}
 
-	return NewTDXProxy(credentials.AppID, credentials.AppKey, logger), nil
+	return NewProxy(credentials.AppID, credentials.AppKey, logger), nil
 }
 
-func NewTDXProxyNoAuth(logger *slog.Logger) *TDXProxy {
+func NewNoAuthProxy(logger *slog.Logger) TDXProxy {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &TDXProxy{
+	return &proxy{
 		appID:   "",
 		appKey:  "",
-		baseUrl: TDX_URL_BASIC,
+		baseUrl: URL_BASIC,
 		logger:  logger,
 	}
 }
 
-func (proxy *TDXProxy) Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error) {
+// Get sends a GET request to the TDX platform.
+// If the request fails due to an expired token, it will attempt to refresh the token and retry.
+// If the request fails due to rate limiting, it will retry after a short delay. The maximum number of retries is 3.
+func (proxy *proxy) Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error) {
 	if params == nil {
 		params = map[string]string{"$format": "JSON"}
 	}
 	return proxy.requestWithRetry(url, params, headers, timeout, 0)
 }
 
-func (proxy *TDXProxy) SetBaseURL(url string) {
+// SetBaseURL sets the base URL for the TDX platform.
+func (proxy *proxy) SetBaseURL(url string) {
 	if url == "" {
 		proxy.logger.Warn("Empty base URL provided")
 		return
@@ -106,7 +115,7 @@ func (proxy *TDXProxy) SetBaseURL(url string) {
 	proxy.baseUrl = url
 }
 
-func (proxy *TDXProxy) requestWithRetry(url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
+func (proxy *proxy) requestWithRetry(url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
 	if retryCount > 2 {
 		return nil, fmt.Errorf("max retry attempts reached for %s", url)
 	}
@@ -139,7 +148,7 @@ func (proxy *TDXProxy) requestWithRetry(url string, params, headers map[string]s
 	return resp, nil
 }
 
-func (proxy *TDXProxy) handleResponse(resp *http.Response, url string, params, headers map[string]string, timeout time.Duration, retryCount int) error {
+func (proxy *proxy) handleResponse(resp *http.Response, url string, params, headers map[string]string, timeout time.Duration, retryCount int) error {
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusNotModified:
 		proxy.logger.Info("Successful request", slog.String("url", url), slog.Int("status", resp.StatusCode))
@@ -164,7 +173,7 @@ func (proxy *TDXProxy) handleResponse(resp *http.Response, url string, params, h
 }
 
 // buildFullURL constructs the full API URL with query parameters.
-func (proxy *TDXProxy) buildFullURL(url string, params map[string]string) string {
+func (proxy *proxy) buildFullURL(url string, params map[string]string) string {
 	var builder strings.Builder
 	builder.WriteString(proxy.baseUrl)
 	builder.WriteString(url)
@@ -177,7 +186,7 @@ func (proxy *TDXProxy) buildFullURL(url string, params map[string]string) string
 }
 
 // buildAuthHeaders constructs headers including authorization if applicable.
-func (proxy *TDXProxy) buildAuthHeaders(timeout time.Duration) (map[string]string, error) {
+func (proxy *proxy) buildAuthHeaders(timeout time.Duration) (map[string]string, error) {
 	headers := map[string]string{
 		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36",
 	}
@@ -197,7 +206,7 @@ func (proxy *TDXProxy) buildAuthHeaders(timeout time.Duration) (map[string]strin
 }
 
 // updateAuth fetches a new authentication token.
-func (proxy *TDXProxy) updateAuth(timeout time.Duration) error {
+func (proxy *proxy) updateAuth(timeout time.Duration) error {
 	data := fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", proxy.appID, proxy.appKey)
 	req, err := http.NewRequest("POST", authURL, bytes.NewBufferString(data))
 	if err != nil {
