@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ func NewProxy(appID, appKey string, logger *slog.Logger) TDXProxy {
 	}
 }
 
-// NewTDXProxyFromCredentialFile creates a new TDXProxy instance using credentials from a file.
+// NewProxyFromCredentialFile creates a new TDXProxy instance using credentials from a file.
 // The file should be in JSON format and contain the following fields:
 //
 //	{
@@ -107,10 +108,17 @@ func (proxy *proxy) Get(url string, params map[string]string, headers map[string
 	if params == nil {
 		params = map[string]string{"$format": "JSON"}
 	}
+	if _, ok := params["$format"]; !ok {
+		params["$format"] = "JSON"
+	}
+	if headers == nil {
+		headers = map[string]string{}
+	}
 	return proxy.requestWithRetry(url, params, headers, timeout, 0)
 }
 
 // SetBaseURL sets the base URL for the TDX platform.
+// Default is URL_BASIC
 func (proxy *proxy) SetBaseURL(url string) {
 	if url == "" {
 		proxy.logger.Warn("Empty base URL provided")
@@ -121,6 +129,7 @@ func (proxy *proxy) SetBaseURL(url string) {
 }
 
 // SetHost sets the host URL for the TDX platform.
+// Default is TDX_HOST
 func (proxy *proxy) SetHost(url string) {
 	if url == "" {
 		proxy.logger.Warn("Empty host URL provided")
@@ -193,26 +202,25 @@ func (proxy *proxy) handleResponse(resp *http.Response, url string, params, head
 }
 
 // buildFullURL constructs the full API URL with query parameters.
-func (proxy *proxy) buildFullURL(url string, params map[string]string) string {
+func (proxy *proxy) buildFullURL(queryUrl string, params map[string]string) string {
 	var builder strings.Builder
 	builder.WriteString(proxy.host)
 	builder.WriteString(proxy.baseUrl)
-	builder.WriteString(url)
+	builder.WriteString(queryUrl)
 	builder.WriteString("?")
 
 	for k, v := range params {
-		builder.WriteString(fmt.Sprintf("%s=%s&", k, v))
+		builder.WriteString(fmt.Sprintf("%s=%s&", url.QueryEscape(k), url.QueryEscape(v)))
 	}
 	return strings.TrimSuffix(builder.String(), "&")
 }
 
 // buildAuthHeaders constructs headers including authorization if applicable.
 func (proxy *proxy) buildAuthHeaders(timeout time.Duration) (map[string]string, error) {
-	headers := map[string]string{
-		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36",
-	}
-
-	if proxy.appID == "" || proxy.appKey == "" {
+	if proxy.appID == "" || proxy.appKey == "" { // no auth, return browser headers for 20 requests per day
+		headers := map[string]string{
+			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36",
+		}
 		return headers, nil
 	}
 
@@ -222,7 +230,9 @@ func (proxy *proxy) buildAuthHeaders(timeout time.Duration) (map[string]string, 
 			return nil, err
 		}
 	}
-	headers["Authorization"] = "Bearer " + proxy.authToken
+	headers := map[string]string{
+		"Authorization": "Bearer " + proxy.authToken,
+	}
 	return headers, nil
 }
 
