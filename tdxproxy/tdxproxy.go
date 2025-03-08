@@ -20,16 +20,16 @@ const (
 	URL_AUTH  = "/auth/realms/TDXConnect/protocol/openid-connect/token"
 )
 
-// TDXProxy simplifies the interface process with the TDX platform.
+// Proxy simplifies the interface process with the TDX platform.
 // You can directly call the TDX platform's API as long as
 // the Client ID and Secret Key are provided.
-type TDXProxy interface {
+type Proxy interface {
 	Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error)
 	SetBaseURL(url string)
 	SetHost(url string)
 }
 
-type proxy struct {
+type TDXProxy struct {
 	appID       string
 	appKey      string
 	authToken   string
@@ -39,11 +39,11 @@ type proxy struct {
 	logger      *slog.Logger
 }
 
-func NewProxy(appID, appKey string, logger *slog.Logger) TDXProxy {
+func NewProxy(appID, appKey string, logger *slog.Logger) *TDXProxy {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &proxy{
+	return &TDXProxy{
 		appID:       appID,
 		appKey:      appKey,
 		baseUrl:     URL_BASIC,
@@ -63,7 +63,7 @@ func NewProxy(appID, appKey string, logger *slog.Logger) TDXProxy {
 //	}
 //
 // The file path can be specified as the first argument, or the TDX_CREDENTIALS_FILE environment variable.
-func NewProxyFromCredentialFile(fileName string, logger *slog.Logger) (TDXProxy, error) {
+func NewProxyFromCredentialFile(fileName string, logger *slog.Logger) (*TDXProxy, error) {
 	if fileName == "" {
 		fileName = os.Getenv("TDX_CREDENTIALS_FILE")
 	}
@@ -88,11 +88,11 @@ func NewProxyFromCredentialFile(fileName string, logger *slog.Logger) (TDXProxy,
 	return NewProxy(credentials.AppID, credentials.AppKey, logger), nil
 }
 
-func NewNoAuthProxy(logger *slog.Logger) TDXProxy {
+func NewNoAuthProxy(logger *slog.Logger) *TDXProxy {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &proxy{
+	return &TDXProxy{
 		appID:   "",
 		appKey:  "",
 		host:    TDX_HOST,
@@ -104,7 +104,7 @@ func NewNoAuthProxy(logger *slog.Logger) TDXProxy {
 // Get sends a GET request to the TDX platform.
 // If the request fails due to an expired token, it will attempt to refresh the token and retry.
 // If the request fails due to rate limiting, it will retry after a short delay. The maximum number of retries is 3.
-func (proxy *proxy) Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error) {
+func (proxy *TDXProxy) Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error) {
 	if params == nil {
 		params = map[string]string{"$format": "JSON"}
 	}
@@ -119,7 +119,7 @@ func (proxy *proxy) Get(url string, params map[string]string, headers map[string
 
 // SetBaseURL sets the base URL for the TDX platform.
 // Default is URL_BASIC
-func (proxy *proxy) SetBaseURL(url string) {
+func (proxy *TDXProxy) SetBaseURL(url string) {
 	if url == "" {
 		proxy.logger.Warn("Empty base URL provided")
 		return
@@ -130,7 +130,7 @@ func (proxy *proxy) SetBaseURL(url string) {
 
 // SetHost sets the host URL for the TDX platform.
 // Default is TDX_HOST
-func (proxy *proxy) SetHost(url string) {
+func (proxy *TDXProxy) SetHost(url string) {
 	if url == "" {
 		proxy.logger.Warn("Empty host URL provided")
 		return
@@ -139,7 +139,7 @@ func (proxy *proxy) SetHost(url string) {
 	proxy.host = url
 }
 
-func (proxy *proxy) requestWithRetry(url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
+func (proxy *TDXProxy) requestWithRetry(url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
 	if retryCount > 2 {
 		return nil, fmt.Errorf("max retry attempts reached for %s", url)
 	}
@@ -174,7 +174,7 @@ func (proxy *proxy) requestWithRetry(url string, params, headers map[string]stri
 	return resp, nil
 }
 
-func (proxy *proxy) handleResponse(resp *http.Response, url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
+func (proxy *TDXProxy) handleResponse(resp *http.Response, url string, params, headers map[string]string, timeout time.Duration, retryCount int) (*http.Response, error) {
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusNotModified:
 		proxy.logger.Info("Successful request", slog.String("url", url), slog.Int("status", resp.StatusCode))
@@ -202,7 +202,7 @@ func (proxy *proxy) handleResponse(resp *http.Response, url string, params, head
 }
 
 // buildFullURL constructs the full API URL with query parameters.
-func (proxy *proxy) buildFullURL(queryUrl string, params map[string]string) string {
+func (proxy *TDXProxy) buildFullURL(queryUrl string, params map[string]string) string {
 	var builder strings.Builder
 	builder.WriteString(proxy.host)
 	builder.WriteString(proxy.baseUrl)
@@ -216,7 +216,7 @@ func (proxy *proxy) buildFullURL(queryUrl string, params map[string]string) stri
 }
 
 // buildAuthHeaders constructs headers including authorization if applicable.
-func (proxy *proxy) buildAuthHeaders(timeout time.Duration) (map[string]string, error) {
+func (proxy *TDXProxy) buildAuthHeaders(timeout time.Duration) (map[string]string, error) {
 	if proxy.appID == "" || proxy.appKey == "" { // no auth, return browser headers for 20 requests per day
 		headers := map[string]string{
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36",
@@ -237,7 +237,7 @@ func (proxy *proxy) buildAuthHeaders(timeout time.Duration) (map[string]string, 
 }
 
 // updateAuth fetches a new authentication token.
-func (proxy *proxy) updateAuth(timeout time.Duration) error {
+func (proxy *TDXProxy) updateAuth(timeout time.Duration) error {
 	data := fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", proxy.appID, proxy.appKey)
 	req, err := http.NewRequest("POST", proxy.host+URL_AUTH, bytes.NewBufferString(data))
 	if err != nil {
