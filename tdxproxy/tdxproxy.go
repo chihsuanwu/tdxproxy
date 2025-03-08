@@ -24,9 +24,10 @@ const (
 // You can directly call the TDX platform's API as long as
 // the Client ID and Secret Key are provided.
 type Proxy interface {
-	Get(url string, params map[string]string, headers map[string]string, timeout time.Duration) (*http.Response, error)
+	Get(url string, params map[string]string, headers map[string]string) (*http.Response, error)
 	SetBaseURL(url string)
 	SetHost(url string)
+	SetTimeout(timeout time.Duration)
 }
 
 type TDXProxy struct {
@@ -287,3 +288,5 @@ func (proxy *TDXProxy) updateAuth() error {
 	proxy.expiredTime = time.Now().Unix() + int64(expiresIn) - 60
 	return nil
 }
+
+var _ Proxy = (*TDXProxy)(nil)
