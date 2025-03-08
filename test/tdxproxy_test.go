@@ -1,12 +1,10 @@
 package test
 
 import (
+	"github.com/chihsuanwu/tdxproxy/tdxproxy"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	"github.com/chihsuanwu/tdxproxy/tdxproxy"
 )
 
 func TestGet_Success(t *testing.T) {
@@ -24,7 +22,7 @@ func TestGet_Success(t *testing.T) {
 	proxy := tdxproxy.NewProxy("appID", "appKey", nil)
 	proxy.SetHost(server.URL)
 
-	resp, err := proxy.Get("some_endpoint", nil, nil, 2*time.Second)
+	resp, err := proxy.Get("some_endpoint", nil, nil)
 
 	if err != nil {
 		t.Fatalf("Error: %v", err)
@@ -58,7 +56,7 @@ func TestGet_Unauthorized_RefreshToken(t *testing.T) {
 	proxy := tdxproxy.NewProxy("appID", "appKey", nil)
 	proxy.SetHost(server.URL)
 
-	resp, err := proxy.Get("some_endpoint", nil, nil, 2*time.Second)
+	resp, err := proxy.Get("some_endpoint", nil, nil)
 
 	if err != nil {
 		t.Fatalf("Error: %v", err)
@@ -98,7 +96,7 @@ func TestGet_RateLimit_Retry(t *testing.T) {
 	proxy := tdxproxy.NewProxy("appID", "appKey", nil)
 	proxy.SetHost(server.URL)
 
-	resp, err := proxy.Get("some_endpoint", nil, nil, 2*time.Second)
+	resp, err := proxy.Get("some_endpoint", nil, nil)
 
 	if err != nil {
 		t.Fatalf("Error: %v", err)
@@ -129,7 +127,7 @@ func TestGet_MaxRetriesReached(t *testing.T) {
 	proxy := tdxproxy.NewProxy("appID", "appKey", nil)
 	proxy.SetHost(server.URL)
 
-	resp, err := proxy.Get("some_endpoint", nil, nil, 2*time.Second)
+	resp, err := proxy.Get("some_endpoint", nil, nil)
 
 	if err == nil {
 		t.Fatalf("Expected error, got nil")
@@ -148,7 +146,7 @@ func TestGet_NetworkError(t *testing.T) {
 	proxy := tdxproxy.NewProxy("appID", "appKey", nil)
 	proxy.SetHost("http://localhost:12345")
 
-	resp, err := proxy.Get("some_endpoint", nil, nil, 2*time.Second)
+	resp, err := proxy.Get("some_endpoint", nil, nil)
 
 	if err == nil {
 		t.Fatalf("Expected error, got nil")

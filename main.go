@@ -1,12 +1,10 @@
 package main
 
 import (
+	"github.com/chihsuanwu/tdxproxy/tdxproxy"
 	"io"
 	"log"
 	"os"
-	"time"
-
-	"github.com/chihsuanwu/tdxproxy/tdxproxy"
 )
 
 func main() {
@@ -14,7 +12,7 @@ func main() {
 
 	url := "v2/Bus/Alert/City/Taichung"
 
-	resp, err := proxy.Get(url, nil, nil, 10*time.Second)
+	resp, err := proxy.Get(url, nil, nil)
 	if err != nil {
 		log.Fatalf("Error: %v", err)
 	}
