@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,14 +37,15 @@ type Proxy interface {
 }
 
 type TDXProxy struct {
-	appID       string
-	appKey      string
-	authToken   string
-	host        string
-	baseUrl     string
-	expiredTime int64
-	timeout     time.Duration
-	logger      *slog.Logger
+	appID        string
+	appKey       string
+	authToken    string
+	host         string
+	baseUrl      string
+	expiredTime  int64
+	timeout      time.Duration
+	logger       *slog.Logger
+	lastModified sync.Map // map[string]string stores Last-Modified header value per URL
 }
 
 // NewProxy creates a new TDXProxy instance.
@@ -167,6 +169,13 @@ func (proxy *TDXProxy) requestWithRetry(path string, params, headers map[string]
 		reqHeaders[k] = v
 	}
 
+	// Add If-Modified-Since header if we have a cached Last-Modified value
+	if lastModified, ok := proxy.lastModified.Load(fullURL); ok {
+		if lastModifiedStr, ok := lastModified.(string); ok {
+			reqHeaders["If-Modified-Since"] = lastModifiedStr
+		}
+	}
+
 	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -180,7 +189,7 @@ func (proxy *TDXProxy) requestWithRetry(path string, params, headers map[string]
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	resp, err = proxy.handleResponse(resp, path, params, headers, retryCount)
+	resp, err = proxy.handleResponse(resp, fullURL, path, params, headers, retryCount)
 	if err != nil {
 		return nil, err
 	}
@@ -188,10 +197,18 @@ func (proxy *TDXProxy) requestWithRetry(path string, params, headers map[string]
 	return resp, nil
 }
 
-func (proxy *TDXProxy) handleResponse(resp *http.Response, path string, params, headers map[string]string, retryCount int) (*http.Response, error) {
+func (proxy *TDXProxy) handleResponse(resp *http.Response, fullURL, path string, params, headers map[string]string, retryCount int) (*http.Response, error) {
 	switch resp.StatusCode {
-	case http.StatusOK, http.StatusNotModified:
+	case http.StatusOK:
+		// Store Last-Modified header if present
+		if lastModified := resp.Header.Get("Last-Modified"); lastModified != "" {
+			proxy.lastModified.Store(fullURL, lastModified)
+			proxy.logger.Debug("Stored Last-Modified header", slog.String("url", fullURL), slog.String("last-modified", lastModified))
+		}
 		proxy.logger.Info("Successful request", slog.String("path", path), slog.Int("status", resp.StatusCode))
+		return resp, nil
+	case http.StatusNotModified:
+		proxy.logger.Info("Not modified, using cached version", slog.String("path", path), slog.Int("status", resp.StatusCode))
 		return resp, nil
 	case http.StatusUnauthorized:
 		proxy.logger.Warn("Unauthorized, refreshing token...", slog.String("path", path))

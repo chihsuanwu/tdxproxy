@@ -11,6 +11,7 @@ A Go client library for Taiwan TDX (Transport Data eXchange) platform API.
 - Support for both authenticated and non-authenticated requests
 - Automatic token refresh and retry mechanism
 - Rate limiting handling with automatic retry
+- Automatic conditional requests with Last-Modified/If-Modified-Since headers
 - Structured logging support
 
 ## Installation
@@ -129,6 +130,46 @@ proxy.SetTimeout(30 * time.Second)
 proxy.SetHost("https://custom-host.example.com")
 proxy.SetBaseURL("/api/v3/")
 ```
+
+### Conditional Requests
+
+The library automatically handles HTTP conditional requests using `Last-Modified` and `If-Modified-Since` headers. When the TDX server includes a `Last-Modified` header in the response, the library stores it and automatically sends it as `If-Modified-Since` in subsequent requests to the same URL. If the data hasn't changed, the server responds with `304 Not Modified`, saving bandwidth and improving performance.
+
+```go
+package main
+
+import (
+    "fmt"
+    "io"
+    "log"
+
+    "github.com/chihsuanwu/tdxproxy"
+)
+
+func main() {
+    proxy := tdxproxy.NewProxy("your-app-id", "your-app-key", nil)
+
+    // First request - receives data and stores Last-Modified header
+    resp1, err := proxy.Get("v2/Bus/Alert/City/Taichung", nil, nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("First request status: %d\n", resp1.StatusCode) // 200 OK
+    body1, _ := io.ReadAll(resp1.Body)
+    resp1.Body.Close()
+
+    // Second request to same endpoint - automatically sends If-Modified-Since
+    // If data unchanged, server returns 304 Not Modified with empty body
+    resp2, err := proxy.Get("v2/Bus/Alert/City/Taichung", nil, nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Second request status: %d\n", resp2.StatusCode) // 304 Not Modified
+    resp2.Body.Close()
+}
+```
+
+For a complete example, see [examples/conditional_request](examples/conditional_request/main.go).
 
 ## API Documentation
 

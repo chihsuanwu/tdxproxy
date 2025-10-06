@@ -159,3 +159,62 @@ func TestGet_NetworkError(t *testing.T) {
 		t.Fatalf("Expected nil response, got %v", resp)
 	}
 }
+
+func TestGet_ConditionalRequest_LastModified(t *testing.T) {
+	requestCount := 0
+	lastModifiedTime := "Mon, 02 Jan 2006 15:04:05 GMT"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == authPath {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"access_token": "token", "expires_in": 3600}`))
+		} else {
+			requestCount++
+			if requestCount == 1 {
+				// First request: return data with Last-Modified header
+				w.Header().Set("Last-Modified", lastModifiedTime)
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"data":"success"}`))
+			} else {
+				// Second request: check for If-Modified-Since header
+				ifModifiedSince := r.Header.Get("If-Modified-Since")
+				if ifModifiedSince == lastModifiedTime {
+					// Return 304 Not Modified
+					w.WriteHeader(http.StatusNotModified)
+				} else {
+					t.Errorf("Expected If-Modified-Since header to be %s, got %s", lastModifiedTime, ifModifiedSince)
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(`{"data":"success"}`))
+				}
+			}
+		}
+	}))
+	defer server.Close()
+
+	proxy := tdxproxy.NewProxy("appID", "appKey", nil)
+	proxy.SetHost(server.URL)
+
+	// First request
+	resp1, err := proxy.Get("some_endpoint", nil, nil)
+	if err != nil {
+		t.Fatalf("Error on first request: %v", err)
+	}
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("Expected status code 200 on first request, got %d", resp1.StatusCode)
+	}
+	resp1.Body.Close()
+
+	// Second request - should send If-Modified-Since and receive 304
+	resp2, err := proxy.Get("some_endpoint", nil, nil)
+	if err != nil {
+		t.Fatalf("Error on second request: %v", err)
+	}
+	if resp2.StatusCode != http.StatusNotModified {
+		t.Fatalf("Expected status code 304 on second request, got %d", resp2.StatusCode)
+	}
+	resp2.Body.Close()
+
+	if requestCount != 2 {
+		t.Fatalf("Expected 2 API requests, got %d", requestCount)
+	}
+}
