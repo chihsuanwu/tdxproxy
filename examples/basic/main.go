@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/chihsuanwu/tdxproxy/tdxproxy"
 	"io"
 	"log"
 	"os"
+
+	"github.com/chihsuanwu/tdxproxy"
 )
 
 func main() {
@@ -25,6 +26,7 @@ func main() {
 	log.Println(string(body))
 	log.Println("headers:", resp.Header)
 
-	// save to file
-	os.WriteFile("response.json", body, 0644)
+	if err := os.WriteFile("response.json", body, 0644); err != nil {
+		log.Fatalf("Error writing to file: %v", err)
+	}
 }

@@ -15,9 +15,14 @@ import (
 )
 
 const (
-	TDX_HOST  = "https://tdx.transportdata.tw"
-	URL_BASIC = "/api/basic/"
-	URL_AUTH  = "/auth/realms/TDXConnect/protocol/openid-connect/token"
+	// DefaultHost is the default TDX platform host URL
+	DefaultHost = "https://tdx.transportdata.tw"
+	// defaultBasicPath is the default basic API path
+	defaultBasicPath = "/api/basic/"
+	// authPath is the authentication endpoint path
+	authPath = "/auth/realms/TDXConnect/protocol/openid-connect/token"
+	// browserUserAgent is the User-Agent header to mimic a web browser
+	browserUserAgent = "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
 
 // Proxy simplifies the interface process with the TDX platform.
@@ -51,8 +56,8 @@ func NewProxy(appID, appKey string, logger *slog.Logger) *TDXProxy {
 		appID:       appID,
 		appKey:      appKey,
 		authToken:   "",
-		baseUrl:     URL_BASIC,
-		host:        TDX_HOST,
+		baseUrl:     defaultBasicPath,
+		host:        DefaultHost,
 		expiredTime: time.Now().Unix(),
 		timeout:     10 * time.Second,
 		logger:      logger,
@@ -102,8 +107,8 @@ func NewNoAuthProxy(logger *slog.Logger) *TDXProxy {
 	return &TDXProxy{
 		appID:   "",
 		appKey:  "",
-		host:    TDX_HOST,
-		baseUrl: URL_BASIC,
+		host:    DefaultHost,
+		baseUrl: defaultBasicPath,
 		timeout: 10 * time.Second,
 		logger:  logger,
 	}
@@ -112,12 +117,12 @@ func NewNoAuthProxy(logger *slog.Logger) *TDXProxy {
 // Get sends a GET request to the TDX platform.
 // If the request fails due to an expired token, it will attempt to refresh the token and retry.
 // If the request fails due to rate limiting, it will retry after a short delay. The maximum number of retries is 3.
-func (proxy *TDXProxy) Get(url string, params map[string]string, headers map[string]string) (*http.Response, error) {
-	return proxy.requestWithRetry(url, params, headers, 0)
+func (proxy *TDXProxy) Get(path string, params map[string]string, headers map[string]string) (*http.Response, error) {
+	return proxy.requestWithRetry(path, params, headers, 0)
 }
 
 // SetBaseURL sets the base URL for the TDX platform.
-// Default is URL_BASIC
+// Default is defaultBasicPath
 func (proxy *TDXProxy) SetBaseURL(url string) {
 	if url == "" {
 		proxy.logger.Warn("Empty base URL provided")
@@ -128,7 +133,7 @@ func (proxy *TDXProxy) SetBaseURL(url string) {
 }
 
 // SetHost sets the host URL for the TDX platform.
-// Default is TDX_HOST
+// Default is DefaultHost
 func (proxy *TDXProxy) SetHost(url string) {
 	if url == "" {
 		proxy.logger.Warn("Empty host URL provided")
@@ -148,12 +153,12 @@ func (proxy *TDXProxy) SetTimeout(timeout time.Duration) {
 	proxy.timeout = timeout
 }
 
-func (proxy *TDXProxy) requestWithRetry(url string, params, headers map[string]string, retryCount int) (*http.Response, error) {
+func (proxy *TDXProxy) requestWithRetry(path string, params, headers map[string]string, retryCount int) (*http.Response, error) {
 	if retryCount > 2 {
-		return nil, fmt.Errorf("max retry attempts reached for %s", url)
+		return nil, fmt.Errorf("max retry attempts reached for %s", path)
 	}
 
-	fullURL := proxy.buildFullURL(url, params)
+	fullURL := proxy.buildFullURL(path, params)
 	reqHeaders, err := proxy.buildAuthHeaders()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build auth headers: %w", err)
@@ -175,7 +180,7 @@ func (proxy *TDXProxy) requestWithRetry(url string, params, headers map[string]s
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	resp, err = proxy.handleResponse(resp, url, params, headers, retryCount)
+	resp, err = proxy.handleResponse(resp, path, params, headers, retryCount)
 	if err != nil {
 		return nil, err
 	}
@@ -183,52 +188,58 @@ func (proxy *TDXProxy) requestWithRetry(url string, params, headers map[string]s
 	return resp, nil
 }
 
-func (proxy *TDXProxy) handleResponse(resp *http.Response, url string, params, headers map[string]string, retryCount int) (*http.Response, error) {
+func (proxy *TDXProxy) handleResponse(resp *http.Response, path string, params, headers map[string]string, retryCount int) (*http.Response, error) {
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusNotModified:
-		proxy.logger.Info("Successful request", slog.String("url", url), slog.Int("status", resp.StatusCode))
+		proxy.logger.Info("Successful request", slog.String("path", path), slog.Int("status", resp.StatusCode))
 		return resp, nil
 	case http.StatusUnauthorized:
-		proxy.logger.Warn("Unauthorized, refreshing token...", slog.String("url", url))
+		proxy.logger.Warn("Unauthorized, refreshing token...", slog.String("path", path))
 		resp.Body.Close()
 		if err := proxy.updateAuth(); err != nil {
 			return nil, fmt.Errorf("failed to refresh auth token: %w", err)
 		}
 		proxy.logger.Info("Retrying request after refreshing token")
-		resp, err := proxy.requestWithRetry(url, params, headers, retryCount+1)
+		resp, err := proxy.requestWithRetry(path, params, headers, retryCount+1)
 		return resp, err
 	case http.StatusTooManyRequests:
-		proxy.logger.Warn("Rate limit reached, retrying...", slog.String("url", url))
+		proxy.logger.Warn("Rate limit reached, retrying...", slog.String("path", path))
 		resp.Body.Close()
 		time.Sleep(1 * time.Second)
-		resp, err := proxy.requestWithRetry(url, params, headers, retryCount+1)
+		resp, err := proxy.requestWithRetry(path, params, headers, retryCount+1)
 		return resp, err
 	default:
-		proxy.logger.Error("Unexpected status code", slog.String("url", url), slog.Int("status", resp.StatusCode))
+		proxy.logger.Error("Unexpected status code", slog.String("path", path), slog.Int("status", resp.StatusCode))
 		resp.Body.Close()
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 }
 
 // buildFullURL constructs the full API URL with query parameters.
-func (proxy *TDXProxy) buildFullURL(queryUrl string, params map[string]string) string {
+func (proxy *TDXProxy) buildFullURL(path string, params map[string]string) string {
 	var builder strings.Builder
 	builder.WriteString(proxy.host)
 	builder.WriteString(proxy.baseUrl)
-	builder.WriteString(queryUrl)
-	builder.WriteString("?")
-
-	for k, v := range params {
-		builder.WriteString(fmt.Sprintf("%s=%s&", url.QueryEscape(k), url.QueryEscape(v)))
+	builder.WriteString(path)
+	if len(params) > 0 {
+		builder.WriteString("?")
+		first := true
+		for k, v := range params {
+			if !first {
+				builder.WriteString("&")
+			}
+			builder.WriteString(fmt.Sprintf("%s=%s", url.QueryEscape(k), url.QueryEscape(v)))
+			first = false
+		}
 	}
-	return strings.TrimSuffix(builder.String(), "&")
+	return builder.String()
 }
 
 // buildAuthHeaders constructs headers including authorization if applicable.
 func (proxy *TDXProxy) buildAuthHeaders() (map[string]string, error) {
 	if proxy.appID == "" || proxy.appKey == "" { // no auth, return browser headers for 20 requests per day
 		headers := map[string]string{
-			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36",
+			"User-Agent": browserUserAgent,
 		}
 		return headers, nil
 	}
@@ -248,7 +259,7 @@ func (proxy *TDXProxy) buildAuthHeaders() (map[string]string, error) {
 // updateAuth fetches a new authentication token.
 func (proxy *TDXProxy) updateAuth() error {
 	data := fmt.Sprintf("grant_type=client_credentials&client_id=%s&client_secret=%s", proxy.appID, proxy.appKey)
-	req, err := http.NewRequest("POST", proxy.host+URL_AUTH, bytes.NewBufferString(data))
+	req, err := http.NewRequest("POST", proxy.host+authPath, bytes.NewBufferString(data))
 	if err != nil {
 		return fmt.Errorf("failed to create auth request: %w", err)
 	}

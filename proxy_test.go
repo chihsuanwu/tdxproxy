@@ -1,15 +1,18 @@
-package test
+package tdxproxy_test
 
 import (
-	"github.com/chihsuanwu/tdxproxy/tdxproxy"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/chihsuanwu/tdxproxy"
 )
+
+const authPath = "/auth/realms/TDXConnect/protocol/openid-connect/token"
 
 func TestGet_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == tdxproxy.URL_AUTH {
+		if r.URL.Path == authPath {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"access_token": "token", "expires_in": 3600}`))
 		} else {
@@ -37,7 +40,7 @@ func TestGet_Unauthorized_RefreshToken(t *testing.T) {
 	tokenRequestCount := 0
 	apiRequestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == tdxproxy.URL_AUTH {
+		if r.URL.Path == authPath {
 			tokenRequestCount++
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"access_token": "token", "expires_in": 3600}`))
@@ -78,7 +81,7 @@ func TestGet_Unauthorized_RefreshToken(t *testing.T) {
 func TestGet_RateLimit_Retry(t *testing.T) {
 	apiRequestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == tdxproxy.URL_AUTH {
+		if r.URL.Path == authPath {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"access_token": "token", "expires_in": 3600}`))
 		} else {
@@ -114,7 +117,7 @@ func TestGet_RateLimit_Retry(t *testing.T) {
 func TestGet_MaxRetriesReached(t *testing.T) {
 	apiRequestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == tdxproxy.URL_AUTH {
+		if r.URL.Path == authPath {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(`{"access_token": "token", "expires_in": 3600}`))
 		} else {
